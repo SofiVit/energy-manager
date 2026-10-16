@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: energy-manager-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: energy_manager
+      POSTGRES_PASSWORD: energy_manager_password
+      POSTGRES_DB: energy_manager
+    ports:
+      - "5432:5432"
+    volumes:
+      - energy_manager_data:/var/lib/postgresql/data
+
+volumes:
+  energy_manager_data:
