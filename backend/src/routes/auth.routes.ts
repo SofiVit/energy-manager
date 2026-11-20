@@ -1,221 +1,192 @@
-import express, { Router } from 'express';
-import type { Request, Response } from 'express';
+import crypto from 'node:crypto';
+import { Router } from 'express';
+import type { Response } from 'express';
 import bcrypt from 'bcrypt';
+import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
+import type { SignOptions } from 'jsonwebtoken';
 import { pool } from '../db';
+import { env } from '../config/env';
 import { authenticateToken } from '../middleware/auth.middleware';
 import type { AuthRequest } from '../middleware/auth.middleware';
+import {
+  changePasswordSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  resetPasswordSchema,
+  settingsSchema,
+} from '../schemas/auth.schemas';
+import { AppError, badRequest, notFound, unauthorized } from '../utils/errors';
+import { buildUpdate } from '../utils/sql';
 
 const router = Router();
 
-// Реєстрація користувача
-router.post('/register', async (req: Request, res: Response): Promise<void> => {
-  const { name, email, password, max_power_limit_kw, tariff_type } = req.body;
+const BCRYPT_ROUNDS = 10;
+const RESET_TOKEN_TTL_MINUTES = 15;
+// Порівняння з "порожнім" хешем вирівнює час відповіді, коли email не існує (захист від перебору email)
+const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', BCRYPT_ROUNDS);
 
-  if (!name || !email || !password) {
-    res.status(400).json({ message: "Ім'я, email та пароль є обов'язковими" });
-    return;
-  }
-
-  try {
-    const userExists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (userExists.rows.length > 0) {
-      res.status(400).json({ message: 'Користувач з таким email вже існує' });
-      return;
-    }
-
-    const saltRounds = 10;
-    const password_hash = await bcrypt.hash(password, saltRounds);
-
-    const newUser = await pool.query(
-      `INSERT INTO users (name, email, password_hash, max_power_limit_kw, tariff_type) 
-       VALUES ($1, $2, $3, $4, $5) 
-       RETURNING id, name, email, max_power_limit_kw, tariff_type, base_tariff_rate, language, currency, outage_group, outage_schedule`,
-      [name, email, password_hash, max_power_limit_kw || 3.50, tariff_type || 'single']
-    );
-
-    const token = jwt.sign(
-      { userId: newUser.rows[0].id }, 
-      process.env.JWT_SECRET || 'secret', 
-      { expiresIn: '7d' }
-    );
-
-    res.status(201).json({
-      message: 'Реєстрація успішна',
-      user: newUser.rows[0],
-      token
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Помилка сервера при реєстрації' });
-  }
+// Захист від брутфорсу (підбору паролів): не більше 15 спроб за 15 хвилин з однієї IP-адреси
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { message: 'Забагато спроб. Будь ласка, спробуйте пізніше через 15 хвилин.' },
 });
 
-// Вхід користувача (Login)
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
-  const { email, password } = req.body;
+/** Публічні поля користувача — password_hash сюди не потрапляє ніколи. */
+const USER_COLUMNS = `id, name, email, max_power_limit_kw, tariff_type, base_tariff_rate,
+  language, currency, outage_group, outage_schedule`;
 
-  if (!email || !password) {
-    res.status(400).json({ message: "Email та пароль є обов'язковими" });
-    return;
-  }
+const SETTINGS_COLUMNS = [
+  'name',
+  'email',
+  'max_power_limit_kw',
+  'tariff_type',
+  'base_tariff_rate',
+  'language',
+  'currency',
+  'outage_group',
+  'outage_schedule',
+] as const;
 
-  try {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
-      res.status(400).json({ message: 'Невірний email або пароль' });
-      return;
-    }
+const signToken = (userId: string): string =>
+  jwt.sign({ userId }, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRES_IN as SignOptions['expiresIn'] });
 
-    const user = result.rows[0];
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+const hashResetToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
 
-    if (!isPasswordValid) {
-      res.status(400).json({ message: 'Невірний email або пароль' });
-      return;
-    }
+// POST /api/auth/register
+router.post('/register', authLimiter, async (req, res: Response) => {
+  const data = registerSchema.parse(req.body);
+  const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
 
-    const token = jwt.sign(
-      { userId: user.id }, 
-      process.env.JWT_SECRET || 'secret', 
-      { expiresIn: '7d' }
-    );
+  // Унікальність email гарантує обмеження БД (23505 → 409 в errorHandler): без гонки між SELECT та INSERT
+  const result = await pool.query(
+    `INSERT INTO users (name, email, password_hash, max_power_limit_kw, tariff_type)
+     VALUES ($1, $2, $3, COALESCE($4, 3.50), COALESCE($5, 'single'))
+     RETURNING ${USER_COLUMNS}`,
+    [data.name, data.email, passwordHash, data.max_power_limit_kw ?? null, data.tariff_type ?? null],
+  );
 
-    res.json({
-      message: 'Вхід успішний',
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        max_power_limit_kw: user.max_power_limit_kw,
-        tariff_type: user.tariff_type,
-        base_tariff_rate: user.base_tariff_rate,
-        language: user.language,
-        currency: user.currency,
-        outage_group: user.outage_group,
-        outage_schedule: user.outage_schedule
-      },
-      token
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Помилка сервера при вході' });
-  }
+  const user = result.rows[0];
+  res.status(201).json({ message: 'Реєстрація успішна', user, token: signToken(user.id) });
 });
 
-// Отримати профіль поточного користувача (при перезавантаженні сторінки на фронтенді)
-router.get('/me', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const result = await pool.query(
-      `SELECT id, name, email, max_power_limit_kw, tariff_type, base_tariff_rate, language, currency, outage_group, outage_schedule 
-       FROM users WHERE id = $1`,
-      [req.user?.id]
-    );
+// POST /api/auth/login
+router.post('/login', authLimiter, async (req, res: Response) => {
+  const { email, password } = loginSchema.parse(req.body);
 
-    if (result.rows.length === 0) {
-      res.status(404).json({ message: 'Користувача не знайдено' });
-      return;
-    }
+  const result = await pool.query(`SELECT ${USER_COLUMNS}, password_hash FROM users WHERE email = $1`, [email]);
+  const row = result.rows[0];
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Помилка отримання профілю' });
-  }
+  const isValid = await bcrypt.compare(password, row?.password_hash ?? DUMMY_HASH);
+  if (!row || !isValid) throw unauthorized('Невірний email або пароль');
+
+  const { password_hash: _omit, ...user } = row;
+  res.json({ message: 'Вхід успішний', user, token: signToken(user.id) });
 });
 
-// Оновити налаштування профілю (Settings + параметри тарифів/відключень у Planning)
-router.patch('/settings', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    const {
-      name,
-      email,
-      max_power_limit_kw,
-      tariff_type,
-      base_tariff_rate,
-      language,
-      currency,
-      outage_group,
-      outage_schedule
-    } = req.body;
+// POST /api/auth/forgot-password — запит на відновлення забутого пароля
+router.post('/forgot-password', authLimiter, async (req, res: Response) => {
+  const { email } = forgotPasswordSchema.parse(req.body);
 
-    const currentRes = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
-    if (currentRes.rows.length === 0) {
-      res.status(404).json({ message: 'Користувача не знайдено' });
-      return;
-    }
-    const current = currentRes.rows[0];
+  const userRes = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+  let devResetToken: string | undefined;
 
-    const updatedRes = await pool.query(
-      `UPDATE users SET
-        name = $1,
-        email = $2,
-        max_power_limit_kw = $3,
-        tariff_type = $4,
-        base_tariff_rate = $5,
-        language = $6,
-        currency = $7,
-        outage_group = $8,
-        outage_schedule = $9,
-        updated_at = CURRENT_TIMESTAMP
-       WHERE id = $10
-       RETURNING id, name, email, max_power_limit_kw, tariff_type, base_tariff_rate, language, currency, outage_group, outage_schedule`,
-      [
-        name ?? current.name,
-        email ?? current.email,
-        max_power_limit_kw ?? current.max_power_limit_kw,
-        tariff_type ?? current.tariff_type,
-        base_tariff_rate ?? current.base_tariff_rate,
-        language ?? current.language,
-        currency ?? current.currency,
-        outage_group !== undefined ? outage_group : current.outage_group,
-        outage_schedule !== undefined ? JSON.stringify(outage_schedule) : JSON.stringify(current.outage_schedule),
-        userId
-      ]
+  if (userRes.rows.length > 0) {
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashResetToken(rawToken);
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+
+    await pool.query(
+      'UPDATE users SET reset_token_hash = $1, reset_token_expires = $2 WHERE id = $3',
+      [tokenHash, expiresAt, userRes.rows[0].id],
     );
 
-    res.json({
-      message: 'Налаштування збережено',
-      user: updatedRes.rows[0]
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Помилка оновлення налаштувань' });
+    if (env.NODE_ENV !== 'production') {
+      devResetToken = rawToken;
+      if (env.NODE_ENV !== 'test') {
+        console.log(`🔑 [DEV] Токен скидання пароля для ${email}: ${rawToken}`);
+      }
+    }
   }
+
+  res.json({
+    message: 'Якщо акаунт із таким email існує, інструкції для відновлення пароля надіслано',
+    ...(devResetToken ? { dev_reset_token: devResetToken } : {}),
+  });
 });
 
-// Зміна пароля (кнопка Change Password у Settings)
-router.patch('/password', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    const { currentPassword, newPassword } = req.body;
+// POST /api/auth/reset-password — встановлення нового пароля за токеном
+router.post('/reset-password', authLimiter, async (req, res: Response) => {
+  const { token, newPassword } = resetPasswordSchema.parse(req.body);
+  const tokenHash = hashResetToken(token);
 
-    if (!currentPassword || !newPassword) {
-      res.status(400).json({ message: 'Введіть поточний та новий паролі' });
-      return;
-    }
+  const userRes = await pool.query(
+    'SELECT id FROM users WHERE reset_token_hash = $1 AND reset_token_expires > NOW()',
+    [tokenHash],
+  );
 
-    const userRes = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
-    if (userRes.rows.length === 0) {
-      res.status(404).json({ message: 'Користувача не знайдено' });
-      return;
-    }
-
-    const isValid = await bcrypt.compare(currentPassword, userRes.rows[0].password_hash);
-    if (!isValid) {
-      res.status(400).json({ message: 'Невірний поточний пароль' });
-      return;
-    }
-
-    const newHash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newHash, userId]);
-
-    res.json({ message: 'Пароль успішно змінено' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Помилка зміни пароля' });
+  if (userRes.rows.length === 0) {
+    throw badRequest('Недійсний або прострочений токен відновлення пароля');
   }
+
+  const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  await pool.query(
+    `UPDATE users
+     SET password_hash = $1, reset_token_hash = NULL, reset_token_expires = NULL, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
+    [newHash, userRes.rows[0].id],
+  );
+
+  res.json({ message: 'Пароль успішно відновлено. Тепер ви можете увійти з новим паролем.' });
+});
+
+// GET /api/auth/me
+router.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const result = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1`, [req.user?.id]);
+  if (result.rows.length === 0) throw notFound('Користувача не знайдено');
+  res.json(result.rows[0]);
+});
+
+// PATCH /api/auth/settings — часткове оновлення профілю та параметрів енергосистеми
+router.patch('/settings', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const data = settingsSchema.parse(req.body);
+  const update = buildUpdate(SETTINGS_COLUMNS, data, { jsonColumns: ['outage_schedule'] });
+  if (!update) throw badRequest('Не передано жодного поля для оновлення');
+
+  const result = await pool.query(
+    `UPDATE users SET ${update.setClause}, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $${update.values.length + 1}
+     RETURNING ${USER_COLUMNS}`,
+    [...update.values, req.user?.id],
+  );
+
+  if (result.rows.length === 0) throw notFound('Користувача не знайдено');
+  res.json({ message: 'Налаштування збережено', user: result.rows[0] });
+});
+
+// PATCH /api/auth/password
+router.patch('/password', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+
+  const userRes = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user?.id]);
+  if (userRes.rows.length === 0) throw notFound('Користувача не знайдено');
+
+  const isValid = await bcrypt.compare(currentPassword, userRes.rows[0].password_hash);
+  if (!isValid) throw new AppError(400, 'Невірний поточний пароль');
+
+  const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  await pool.query('UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [
+    newHash,
+    req.user?.id,
+  ]);
+
+  res.json({ message: 'Пароль успішно змінено' });
 });
 
 export default router;

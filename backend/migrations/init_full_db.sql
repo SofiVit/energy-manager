@@ -1,11 +1,6 @@
 --
--- PostgreSQL database dump
+-- PostgreSQL database dump (Clean schema + seed data)
 --
-
--- Dumped from database version 18.6
--- Dumped by pg_dump version 18.6
-
--- Started on 2026-11-19 11:54:32
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -19,31 +14,12 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
---
--- TOC entry 2 (class 3079 OID 24706)
--- Name: uuid-ossp; Type: EXTENSION; Schema: -; Owner: -
---
-
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
-
-
---
--- TOC entry 5108 (class 0 OID 0)
--- Dependencies: 2
--- Name: EXTENSION "uuid-ossp"; Type: COMMENT; Schema: -; Owner: 
---
 
 COMMENT ON EXTENSION "uuid-ossp" IS 'generate universally unique identifiers (UUIDs)';
 
-
 SET default_tablespace = '';
-
 SET default_table_access_method = heap;
-
---
--- TOC entry 222 (class 1259 OID 24742)
--- Name: categories; Type: TABLE; Schema: public; Owner: postgres
---
 
 CREATE TABLE public.categories (
     id integer NOT NULL,
@@ -52,13 +28,7 @@ CREATE TABLE public.categories (
     name_en character varying(100)
 );
 
-
-ALTER TABLE public.categories OWNER TO postgres;
-
---
--- TOC entry 221 (class 1259 OID 24741)
--- Name: categories_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
---
+ALTER TABLE public.categories OWNER TO energy_manager;
 
 CREATE SEQUENCE public.categories_id_seq
     AS integer
@@ -68,22 +38,8 @@ CREATE SEQUENCE public.categories_id_seq
     NO MAXVALUE
     CACHE 1;
 
-
-ALTER SEQUENCE public.categories_id_seq OWNER TO postgres;
-
---
--- TOC entry 5109 (class 0 OID 0)
--- Dependencies: 221
--- Name: categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
---
-
+ALTER SEQUENCE public.categories_id_seq OWNER TO energy_manager;
 ALTER SEQUENCE public.categories_id_seq OWNED BY public.categories.id;
-
-
---
--- TOC entry 224 (class 1259 OID 24754)
--- Name: device_presets; Type: TABLE; Schema: public; Owner: postgres
---
 
 CREATE TABLE public.device_presets (
     id integer NOT NULL,
@@ -99,13 +55,7 @@ CREATE TABLE public.device_presets (
     CONSTRAINT device_presets_priority_check CHECK (((priority >= 1) AND (priority <= 5)))
 );
 
-
-ALTER TABLE public.device_presets OWNER TO postgres;
-
---
--- TOC entry 223 (class 1259 OID 24753)
--- Name: device_presets_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
---
+ALTER TABLE public.device_presets OWNER TO energy_manager;
 
 CREATE SEQUENCE public.device_presets_id_seq
     AS integer
@@ -115,22 +65,8 @@ CREATE SEQUENCE public.device_presets_id_seq
     NO MAXVALUE
     CACHE 1;
 
-
-ALTER SEQUENCE public.device_presets_id_seq OWNER TO postgres;
-
---
--- TOC entry 5110 (class 0 OID 0)
--- Dependencies: 223
--- Name: device_presets_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
---
-
+ALTER SEQUENCE public.device_presets_id_seq OWNER TO energy_manager;
 ALTER SEQUENCE public.device_presets_id_seq OWNED BY public.device_presets.id;
-
-
---
--- TOC entry 226 (class 1259 OID 24810)
--- Name: power_sources; Type: TABLE; Schema: public; Owner: postgres
---
 
 CREATE TABLE public.power_sources (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
@@ -144,13 +80,7 @@ CREATE TABLE public.power_sources (
     CONSTRAINT power_sources_type_check CHECK (((type)::text = ANY ((ARRAY['station'::character varying, 'inverter_battery'::character varying, 'generator'::character varying])::text[])))
 );
 
-
-ALTER TABLE public.power_sources OWNER TO postgres;
-
---
--- TOC entry 227 (class 1259 OID 24830)
--- Name: schedules; Type: TABLE; Schema: public; Owner: postgres
---
+ALTER TABLE public.power_sources OWNER TO energy_manager;
 
 CREATE TABLE public.schedules (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
@@ -164,13 +94,7 @@ CREATE TABLE public.schedules (
     CONSTRAINT schedules_strategy_check CHECK (((strategy)::text = ANY ((ARRAY['peak_shaving'::character varying, 'cost_min'::character varying, 'balanced'::character varying])::text[])))
 );
 
-
-ALTER TABLE public.schedules OWNER TO postgres;
-
---
--- TOC entry 225 (class 1259 OID 24778)
--- Name: user_devices; Type: TABLE; Schema: public; Owner: postgres
---
+ALTER TABLE public.schedules OWNER TO energy_manager;
 
 CREATE TABLE public.user_devices (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
@@ -189,13 +113,7 @@ CREATE TABLE public.user_devices (
     CONSTRAINT user_devices_priority_check CHECK (((priority >= 1) AND (priority <= 5)))
 );
 
-
-ALTER TABLE public.user_devices OWNER TO postgres;
-
---
--- TOC entry 220 (class 1259 OID 24717)
--- Name: users; Type: TABLE; Schema: public; Owner: postgres
---
+ALTER TABLE public.user_devices OWNER TO energy_manager;
 
 CREATE TABLE public.users (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
@@ -211,34 +129,19 @@ CREATE TABLE public.users (
     language character varying(5) DEFAULT 'uk'::character varying NOT NULL,
     currency character varying(10) DEFAULT 'UAH'::character varying NOT NULL,
     outage_schedule jsonb DEFAULT '[]'::jsonb NOT NULL,
+    reset_token_hash character varying(255) DEFAULT NULL::character varying,
+    reset_token_expires timestamp with time zone DEFAULT NULL::timestamp with time zone,
     CONSTRAINT users_tariff_type_check CHECK (((tariff_type)::text = ANY ((ARRAY['single'::character varying, 'dual'::character varying, 'triple'::character varying])::text[])))
 );
 
-
-ALTER TABLE public.users OWNER TO postgres;
-
---
--- TOC entry 4898 (class 2604 OID 24745)
--- Name: categories id; Type: DEFAULT; Schema: public; Owner: postgres
---
+ALTER TABLE public.users OWNER TO energy_manager;
 
 ALTER TABLE ONLY public.categories ALTER COLUMN id SET DEFAULT nextval('public.categories_id_seq'::regclass);
-
-
---
--- TOC entry 4900 (class 2604 OID 24757)
--- Name: device_presets id; Type: DEFAULT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.device_presets ALTER COLUMN id SET DEFAULT nextval('public.device_presets_id_seq'::regclass);
 
-
 --
--- TOC entry 5097 (class 0 OID 24742)
--- Dependencies: 222
--- Data for Name: categories; Type: TABLE DATA; Schema: public; Owner: postgres
+-- Seed data: categories
 --
-
 INSERT INTO public.categories VALUES (1, 'Велика побутова техніка', 'large_appliances', 'Large Home Appliances') ON CONFLICT DO NOTHING;
 INSERT INTO public.categories VALUES (2, 'Кухонні прилади', 'kitchen', 'Kitchen Appliances') ON CONFLICT DO NOTHING;
 INSERT INTO public.categories VALUES (3, 'Клімат та обігрів', 'climate', 'Climate & Heating') ON CONFLICT DO NOTHING;
@@ -249,13 +152,9 @@ INSERT INTO public.categories VALUES (13, 'Господарські прилад
 INSERT INTO public.categories VALUES (14, 'Інструменти та інше', 'wrench', 'Tools & Other') ON CONFLICT DO NOTHING;
 INSERT INTO public.categories VALUES (5, 'Догляд та прибирання', 'cleaning', 'Care & Cleaning') ON CONFLICT DO NOTHING;
 
-
 --
--- TOC entry 5099 (class 0 OID 24754)
--- Dependencies: 224
--- Data for Name: device_presets; Type: TABLE DATA; Schema: public; Owner: postgres
+-- Seed data: device_presets
 --
-
 INSERT INTO public.device_presets VALUES (1, 1, 'Пральна машина', 2000, 3, 90, false, 'Washing Machine', 'flexible') ON CONFLICT DO NOTHING;
 INSERT INTO public.device_presets VALUES (2, 1, 'Бойлер (80л)', 1500, 3, 120, false, 'Water Heater / Boiler (80L)', 'flexible') ON CONFLICT DO NOTHING;
 INSERT INTO public.device_presets VALUES (31, 3, 'Бойлер електричний (80л)', 1500, 1, 180, false, 'Water Heater / Boiler (80L)', 'flexible') ON CONFLICT DO NOTHING;
@@ -326,199 +225,50 @@ INSERT INTO public.device_presets VALUES (67, 13, 'Праска з пароге�
 INSERT INTO public.device_presets VALUES (68, 14, 'Дриль / Перфоратор', 850, 3, 30, false, 'Drill / Rotary Hammer', 'flexible') ON CONFLICT DO NOTHING;
 INSERT INTO public.device_presets VALUES (69, 14, 'Зарядний пристрій для акумуляторного інструменту', 90, 3, 60, true, 'Cordless Tool Battery Charger', 'flexible') ON CONFLICT DO NOTHING;
 
-
---
--- TOC entry 5101 (class 0 OID 24810)
--- Dependencies: 226
--- Data for Name: power_sources; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-
-
---
--- TOC entry 5102 (class 0 OID 24830)
--- Dependencies: 227
--- Data for Name: schedules; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-
-
---
--- TOC entry 5100 (class 0 OID 24778)
--- Dependencies: 225
--- Data for Name: user_devices; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-INSERT INTO public.user_devices VALUES ('7de0fa7b-9b18-401c-85d4-74a958e2d35f', '178b787c-3b9c-4746-a45a-6202f885e98f', NULL, 'Кавоварка', 1450, 5, 30, true, true, '2026-11-19 11:33:52.031173+02', 2, 'scheduled') ON CONFLICT DO NOTHING;
-
-
---
--- TOC entry 5095 (class 0 OID 24717)
--- Dependencies: 220
--- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-INSERT INTO public.users VALUES ('178b787c-3b9c-4746-a45a-6202f885e98f', 'Олександра', 'sasha@test.com', '$2b$10$U7ZjN4HUnXtjaRjlHrM.eOMCfTbQB3ziXb9WnCILqMTh8HGcQjr02', 3.50, 'single', 4.32, NULL, '2026-11-19 11:28:51.053578+02', '2026-11-19 11:28:51.053578+02', 'uk', 'UAH', '[]') ON CONFLICT DO NOTHING;
-
-
---
--- TOC entry 5111 (class 0 OID 0)
--- Dependencies: 221
--- Name: categories_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
---
-
 SELECT pg_catalog.setval('public.categories_id_seq', 14, true);
-
-
---
--- TOC entry 5112 (class 0 OID 0)
--- Dependencies: 223
--- Name: device_presets_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
---
-
 SELECT pg_catalog.setval('public.device_presets_id_seq', 69, true);
-
-
---
--- TOC entry 4929 (class 2606 OID 24890)
--- Name: categories categories_name_en_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.categories
     ADD CONSTRAINT categories_name_en_key UNIQUE (name_en);
 
-
---
--- TOC entry 4931 (class 2606 OID 24752)
--- Name: categories categories_name_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.categories
     ADD CONSTRAINT categories_name_key UNIQUE (name);
-
-
---
--- TOC entry 4933 (class 2606 OID 24750)
--- Name: categories categories_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.categories
     ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
 
-
---
--- TOC entry 4935 (class 2606 OID 24772)
--- Name: device_presets device_presets_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.device_presets
     ADD CONSTRAINT device_presets_pkey PRIMARY KEY (id);
-
-
---
--- TOC entry 4939 (class 2606 OID 24824)
--- Name: power_sources power_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.power_sources
     ADD CONSTRAINT power_sources_pkey PRIMARY KEY (id);
 
-
---
--- TOC entry 4941 (class 2606 OID 24846)
--- Name: schedules schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.schedules
     ADD CONSTRAINT schedules_pkey PRIMARY KEY (id);
-
-
---
--- TOC entry 4937 (class 2606 OID 24799)
--- Name: user_devices user_devices_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.user_devices
     ADD CONSTRAINT user_devices_pkey PRIMARY KEY (id);
 
-
---
--- TOC entry 4925 (class 2606 OID 24740)
--- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_email_key UNIQUE (email);
-
-
---
--- TOC entry 4927 (class 2606 OID 24738)
--- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 
-
---
--- TOC entry 4942 (class 2606 OID 24773)
--- Name: device_presets device_presets_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.device_presets
     ADD CONSTRAINT device_presets_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id) ON DELETE CASCADE;
-
-
---
--- TOC entry 4946 (class 2606 OID 24825)
--- Name: power_sources power_sources_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.power_sources
     ADD CONSTRAINT power_sources_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
-
---
--- TOC entry 4947 (class 2606 OID 24847)
--- Name: schedules schedules_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.schedules
     ADD CONSTRAINT schedules_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- TOC entry 4943 (class 2606 OID 24893)
--- Name: user_devices user_devices_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
 
 ALTER TABLE ONLY public.user_devices
     ADD CONSTRAINT user_devices_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id) ON DELETE SET NULL;
 
-
---
--- TOC entry 4944 (class 2606 OID 24805)
--- Name: user_devices user_devices_preset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.user_devices
     ADD CONSTRAINT user_devices_preset_id_fkey FOREIGN KEY (preset_id) REFERENCES public.device_presets(id) ON DELETE SET NULL;
 
-
---
--- TOC entry 4945 (class 2606 OID 24800)
--- Name: user_devices user_devices_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
 ALTER TABLE ONLY public.user_devices
     ADD CONSTRAINT user_devices_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
--- Completed on 2026-11-19 11:54:33
-
---
--- PostgreSQL database dump complete
---
-
-
-

@@ -1,38 +1,28 @@
-// src/middleware/auth.middleware.ts
-import type { Request, Response, NextFunction } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { env } from '../config/env';
+import { unauthorized } from '../utils/errors';
 
 export interface AuthRequest extends Request {
-  user?: {
-    id: string;
-  };
+  user?: { id: string };
 }
 
-export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Дістаємо токен після "Bearer "
+const PayloadSchema = z.object({ userId: z.uuid() });
 
-  if (!token) {
-    res.status(401).json({ message: 'Немає доступу: відсутній токен авторизації' });
-    return;
+export function authenticateToken(req: AuthRequest, _res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  const [scheme, token] = header?.split(' ') ?? [];
+
+  if (scheme !== 'Bearer' || !token) {
+    return next(unauthorized('Потрібен токен авторизації'));
   }
 
   try {
-    // Використовуємо той самий запасний ключ 'secret', що і в auth.routes.ts
-    const secret = process.env.JWT_SECRET || 'secret';
-    const decoded = jwt.verify(token, secret) as { userId?: string; id?: string };
-    
-    const extractedId = decoded.userId || decoded.id;
-
-    if (!extractedId) {
-      res.status(403).json({ message: 'Некоректна структура токена' });
-      return;
-    }
-
-    // Записуємо у req.user.id, щоб усі інші роути (device.routes.ts тощо) працювали без змін
-    req.user = { id: extractedId };
+    const payload = PayloadSchema.parse(jwt.verify(token, env.JWT_SECRET));
+    req.user = { id: payload.userId };
     next();
-  } catch (err) {
-    res.status(403).json({ message: 'Недійсний або прострочений токен' });
+  } catch {
+    next(unauthorized('Недійсний або прострочений токен'));
   }
-};
+}

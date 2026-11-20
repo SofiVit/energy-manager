@@ -12,7 +12,9 @@ export const pool = new Pool({
 });
 
 pool.on('connect', () => {
-  console.log('⚡ Успішно підключено до бази даних PostgreSQL');
+  if (process.env.NODE_ENV !== 'test') {
+    console.log('⚡ Успішно підключено до бази даних PostgreSQL');
+  }
 });
 
 pool.on('error', (err) => {

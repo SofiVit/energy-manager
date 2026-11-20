@@ -11,6 +11,38 @@ services:
       - "5432:5432"
     volumes:
       - energy_manager_data:/var/lib/postgresql/data
+      - ./backend/migrations/init_full_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U energy_manager -d energy_manager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: energy-manager-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: energy_manager
+      DB_PASSWORD: energy_manager_password
+      DB_NAME: energy_manager
+      DATABASE_URL: postgresql://energy_manager:energy_manager_password@postgres:5432/energy_manager
+      JWT_SECRET: change_this_to_a_secure_32_char_secret_key_in_prod
+      JWT_EXPIRES_IN: 7d
+      APP_TIMEZONE: Europe/Kyiv
+      OUTAGE_WARN_BEFORE_MINUTES: 15
+      CORS_ORIGIN: http://localhost:5173
 
 volumes:
   energy_manager_data:
