@@ -7,6 +7,7 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import authRoutes from './routes/auth.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import deviceRoutes from './routes/device.routes';
+import sourceRoutes from './routes/source.routes';
 
 export function createApp() {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/devices', deviceRoutes);
   app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/sources', sourceRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
